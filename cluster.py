@@ -125,7 +125,9 @@ def embed_for_clustering(
             save_to_disk=False,
             batch_size=512,
         )
-        corpus_embeddings = corpus_embeddings["embeds"].half().cpu()
+        # corpus_embeddings = corpus_embeddings["embeds"].half().cpu()
+        corpus_embeddings = corpus_embeddings["embeds"].half()
+   
         print("[embed_with_cache] got corpus embeddings, remapping")
 
         assert not corpus_embeddings.isnan().any(), "got nan corpus embeddings"
@@ -135,11 +137,17 @@ def embed_for_clustering(
         cidxs = torch.zeros(len(dataset), dtype=torch.long)
         cidxs[corpus_output_idxs] = torch.arange(len(dataset), dtype=torch.long)
         ##################################################################
-        query_embeddings = query_embeddings[qidxs]
-        corpus_embeddings = corpus_embeddings[cidxs]
+        query_embeddings = query_embeddings[qidxs].float()
+        corpus_embeddings = corpus_embeddings[cidxs].float()
+        print("query embeddings")
+        print(query_embeddings)
+        print(query_embeddings.shape)
+        print("corpus_embeddings")
+        print(corpus_embeddings)
+        print(corpus_embeddings.shape)
         avg_sim = (corpus_embeddings[:100] @ query_embeddings[:100].T).diag().mean()
         print(f"[embed_with_cache] returning all embeddings / avg_sim={avg_sim:.2f}")
-        return query_embeddings, corpus_embeddings, None
+        return query_embeddings, corpus_embeddings
     else:
         raise ValueError(f"model {model} not supported")
 
@@ -149,8 +157,8 @@ def paired_kmeans_sparse(
         q: torch.Tensor,
         X: torch.Tensor, 
         k: int,
-        max_iters: int = 120, 
-        tol: float = 1e-4, 
+        max_iters: int = 100, 
+        tol: float = 1e-3, 
         maximize: bool = True,
         initialization_strategy: str = "kmeans++", # ["kmeans++", "random"]
         seed: int = 42,
@@ -291,7 +299,7 @@ def cluster_dataset_uncached(
             maximize=SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL[model]
         )
     else:
-        _, assignments = paired_kmeans_faiss(
+        centroids, assignments = paired_kmeans_faiss(
             q=q,
             X=X,
             k=k,

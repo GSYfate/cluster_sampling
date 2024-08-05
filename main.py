@@ -9,6 +9,8 @@ from bm25_pt.bm25 import TokenizedBM25
 from cluster import cluster_dataset, pad_to_length
 import json
 import argparse
+import faulthandler
+faulthandler.enable()
 
 def load_tensors(path: str) -> dict:
     return torch.load(path)
@@ -57,16 +59,26 @@ def process_clusters(cluster_assignments, documents):
         cluster_indices[cluster_id].append(doc_id)
 
     cluster_sizes = {cluster_id: len(indices) for cluster_id, indices in cluster_indices.items()}
-    min_docs = min(cluster_sizes.values())
-    max_docs = max(cluster_sizes.values())
+    min_cluster = None
+    max_cluster = None
 
-    print(f"Cluster with the least documents contains: {min_docs} documents")
-    print(f"Cluster with the most documents contains: {max_docs} documents")
+    for cluster_id, indices in cluster_indices.items():
+        cluster_size = len(indices)
+        if min_cluster is None or cluster_size < cluster_sizes[min_cluster]:
+            min_cluster = cluster_id
+        if max_cluster is None or cluster_size > cluster_sizes[max_cluster]:
+            max_cluster = cluster_id
 
-    for cluster_id in range(6):
+    min_docs = cluster_sizes[min_cluster]
+    max_docs = cluster_sizes[max_cluster]
+
+    print(f"Cluster with the least documents is Cluster {min_cluster} with {min_docs} documents")
+    print(f"Cluster with the most documents is Cluster {max_cluster} with {max_docs} documents")
+
+    for cluster_id in [46]:
         if cluster_id in cluster_indices:
             print(f"Documents from Cluster {cluster_id}:")
-            sample_size = min(5, len(cluster_indices[cluster_id]))
+            sample_size = min(10, len(cluster_indices[cluster_id]))
             if sample_size > 0:
                 sample_indices = random.sample(cluster_indices[cluster_id], sample_size)
                 for index in sample_indices:
@@ -168,21 +180,20 @@ def main(args):
 
     with open('centroids.pkl', 'rb') as f:
         centroids = pickle.load(f)
-
     # Process cluster results
     # process_clusters(cluster_assignments, dataset['document'])
 
     # Load BM25 state
-    start_idx = 0
-    end_idx = 10000
+    start_idx =0
+    end_idx = 107892
+    # 107892
     process_action(args.input_filename, tokenizer, args.bm25_state_path, centroids, start_idx, end_idx, args.batch_size)
-    
-
+     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process and cluster textual data.")
-    parser.add_argument('--samples_filename', type=str, default='/home/sg2323/project/authorship/data/amazon/train_100k_samples.jsonl', help='Path to the samples dataset file.')
-    parser.add_argument('--input_filename', type=str, default='/home/sg2323/project/authorship/data/amazon/train_processed.jsonl', help='Path to the input dataset file.')
-    parser.add_argument('--model_path', type=str, default='sentence-transformers/paraphrase-distilroberta-base-v1', help='Path to the model used for tokenization.')
+    parser.add_argument('--samples_filename', type=str, default='data/amazon/train_100k_samples.jsonl', help='Path to the samples dataset file.')
+    parser.add_argument('--input_filename', type=str, default='data/amazon/train_processed.jsonl', help='Path to the input dataset file.')
+    parser.add_argument('--model_path', type=str, default='Salesforce/SFR-Embedding-Mistral', help='Path to the model used for tokenization.')
     parser.add_argument('--model_max_length', type=int, default=128, help='Maximum length of the tokenized sequences.')
     parser.add_argument('--batch_size', type=int, default=512, help='Batch size used for tokenization.')
     parser.add_argument('--cluster_size', type=int, default=1000, help='Size of each cluster.')
