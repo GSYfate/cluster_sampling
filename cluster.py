@@ -5,7 +5,7 @@ import gc
 import math
 import os
 import pickle
-
+import json
 import datasets
 import torch
 import tqdm
@@ -62,6 +62,8 @@ def embed_for_clustering(
     # return torch.randn(len(dataset), 512), torch.randn(len(dataset), 512)
     if model == "bm25":
         document_input_ids = dataset[document_key]
+        print("documnet_input_ids")
+        print(document_input_ids[0])
         document_input_ids = [pad_to_length(t) for t in tqdm_if_main_worker(document_input_ids)]
         if query_to_doc: 
             query_input_ids = dataset[query_key]
@@ -70,18 +72,51 @@ def embed_for_clustering(
             query_input_ids = document_input_ids
         document_input_ids = torch.stack(document_input_ids)
         query_input_ids = torch.stack(query_input_ids)
+        
+        # print("query input ids")
+        # print(query_input_ids[0])
         vocab_size = int(document_input_ids.max() + 1)
         bm25 = TokenizedBM25(vocab_size=vocab_size)
         bm25.index(document_input_ids)
+        # scores = bm25.score_batch(query_input_ids)
+        
+        # with open('demo_bm25.json', 'w') as f:
+        #     results = []
+        #     for index, row in enumerate(scores, start=1):
+        #         values, indices = row.topk(10)
+        #         indices = [int(index) + 1 for index in indices]
+        #         result = {'row': index, 'top 10 indices': indices,'values': values.tolist()}
+        #         results.append(result)
+        #     json.dump(results, f, indent=4)
         queries = bm25.docs_to_bags(query_input_ids).to_sparse_coo()
+    
+        # num_rows = queries.shape[0]
+        # Prepare a tensor to store the max values for each row
+        # max_values = torch.full((num_rows,), float('-inf'))  # Initialize with negative infinity
+
+        # # Iterate through each row's data in the sparse tensor
+        # for i in range(num_rows):
+        #     # Mask for the current row
+        #     row_mask = (queries.indices()[0] == i)
+            
+        #     # Check if the current row has any non-zero entries
+        #     if row_mask.any():
+        #         # Extract values for the current row using the mask
+        #         row_values = queries.values()[row_mask]
+                
+        #         # Find the maximum value in the current row
+        #         max_values[i] = row_values.max()
+
+        # # Replace '-inf' with a sensible default or remove, depending on use-case
+        # max_values[max_values == float('-inf')] = 0  # Example: replace with 0 if no non-zero values were found in the row
+
+        # print("Maximum values for each row:", max_values)
         corpus = bm25._corpus_scores.to_sparse_coo()
-        # print("queries")
-        # print(queries)
-        # print("corpus")
-        # print(corpus)
+        print("corpus")
+        print(corpus)
         if save_path:
             save_tensors({
-                'document_input_ids': document_input_ids,
+                ' ': document_input_ids,
                 'query_input_ids': query_input_ids,
                 'vocab_size': vocab_size
             }, save_path)
@@ -157,11 +192,11 @@ def paired_kmeans_sparse(
         q: torch.Tensor,
         X: torch.Tensor, 
         k: int,
-        max_iters: int = 100, 
-        tol: float = 1e-3, 
+        max_iters: int = 50, 
+        tol: float = 1e-4, 
         maximize: bool = True,
         initialization_strategy: str = "kmeans++", # ["kmeans++", "random"]
-        seed: int = 42,
+        seed: int = 10,
         debug_mem_usage: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Runs paired kmeans.
@@ -275,6 +310,7 @@ def cluster_dataset_uncached(
         query_key: str,
         document_key: str,
         cluster_size: int,
+        save_path: str
     ) -> Dict[int, List[int]]:
     print("[cluster_dataset_uncached] calling embed_for_clustering...")
     q, X= embed_for_clustering(
@@ -283,7 +319,7 @@ def cluster_dataset_uncached(
         document_key=document_key,
         model=model,
         query_to_doc=query_to_doc,
-        save_path='bm25_state.pth'
+        save_path=save_path
     )
     gc.collect()
     
@@ -299,7 +335,7 @@ def cluster_dataset_uncached(
             maximize=SHOULD_MAXIMIZE_CLUSTER_DISTANCE_FOR_MODEL[model]
         )
     else:
-        centroids, assignments = paired_kmeans_faiss(
+        centroids, assignments, kmeans = paired_kmeans_faiss(
             q=q,
             X=X,
             k=k,
@@ -309,7 +345,7 @@ def cluster_dataset_uncached(
     assignments_dict = collections.defaultdict(list)
     for i in tqdm.trange(len(assignments), desc="collecting assigments", leave=False):
         assignments_dict[i].append(assignments[i].item())
-    return centroids, assignments_dict
+    return centroids, assignments_dict, kmeans
 
 
 def cluster_dataset(
@@ -319,6 +355,7 @@ def cluster_dataset(
         query_key: str,
         document_key: str,
         cluster_size: int,
+        save_path: str
     ) -> Dict[int, List[int]]:
     # TODO: Turn this caching logic into a nice decorator?
     clustering_hash = get_cache_location_from_kwargs(
@@ -339,13 +376,14 @@ def cluster_dataset(
     else:
         MAX_DATASET_LEN = 100_000_000
         if len(dataset) < MAX_DATASET_LEN:
-            centroids, result = cluster_dataset_uncached(
+            centroids, result, kmeans = cluster_dataset_uncached(
                 dataset=dataset,
                 model=model,
                 query_to_doc=query_to_doc,
                 query_key=query_key,
                 document_key=document_key,
                 cluster_size=cluster_size,
+                save_path=save_path
             )
         else:
             num_sub_datasets = math.ceil(len(dataset) / MAX_DATASET_LEN)
@@ -363,7 +401,7 @@ def cluster_dataset(
                     range(i, min(i + MAX_DATASET_LEN, len(dataset)))
                 )
                 mini_dataset = mini_dataset.flatten_indices(keep_in_memory=True)
-                mini_centroids, mini_result= cluster_dataset_uncached(
+                mini_centroids, mini_result, mini_kmeans= cluster_dataset_uncached(
                     dataset=mini_dataset,
                     model=model,
                     query_to_doc=query_to_doc,
@@ -391,7 +429,7 @@ def cluster_dataset(
         with open(clustering_hash, 'wb') as f:
             pickle.dump((result, centroids), f)
         # pickle.dump(result, open(clustering_hash, "wb"))
-        return result, centroids
+        return result, centroids, kmeans
 
 
 def cluster_subdomains_uncached(

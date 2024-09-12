@@ -45,5 +45,5 @@ def check_action_type(file_path):
     print(f"Checked {line_number} entries.")
     return
 
-input_file_path = 'data/amazon/train_processed.jsonl'
+input_file_path = 'data/reddit/train_processed_200.jsonl'
 check_action_type(input_file_path)

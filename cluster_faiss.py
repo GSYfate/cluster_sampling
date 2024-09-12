@@ -2,8 +2,10 @@ from typing import Tuple
 
 import gc
 
-# import faiss
+import faiss
 import torch
+
+import pickle
 
 
 def paired_kmeans_faiss(
@@ -18,7 +20,7 @@ def paired_kmeans_faiss(
     # https://github.com/facebookresearch/faiss/blob/dafdff110489db7587b169a0afee8470f220d295/faiss/Clustering.cpp#L56
     # https://github.com/facebookresearch/faiss/blob/main/faiss/Clustering.h
     assert q.shape == X.shape
-    print("[paired_kmeans_faiss]", q.shape, X.shape, k)
+    print("[q]", q.shape, X.shape, k)
     paired_vectors = torch.cat(
         [
             torch.cat((q, X), dim=0),
@@ -46,6 +48,7 @@ def paired_kmeans_faiss(
     # otherwise the kmeans implementation sub-samples the training set
     # to <= 256 points per centroid
     # kmeans.max_points_per_centroid = 512
+
     print("[paired_kmeans_faiss] calling kmeans.train()")
     kmeans.train(paired_vectors)
 
@@ -58,6 +61,6 @@ def paired_kmeans_faiss(
     centroids = torch.tensor(kmeans.centroids)
     assert centroids.shape == (k, paired_vectors.shape[1])
     
-    return centroids, assignments
+    return centroids, assignments, kmeans
 
 
